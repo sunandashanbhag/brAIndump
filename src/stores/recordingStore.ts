@@ -1,8 +1,34 @@
 import { create } from "zustand";
+import NetInfo from "@react-native-community/netinfo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabase";
 import { AICategorizationResult } from "../types";
 import { parseAIResponse } from "../lib/ai";
 import { scheduleReminder } from "../lib/notifications";
+
+const QUEUE_KEY = "braindump_offline_queue";
+
+interface QueuedNote {
+  transcript: string;
+  audioUri: string;
+  duration: number;
+  timestamp: string;
+}
+
+async function getQueue(): Promise<QueuedNote[]> {
+  const raw = await AsyncStorage.getItem(QUEUE_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+async function addToQueue(note: QueuedNote): Promise<void> {
+  const queue = await getQueue();
+  queue.push(note);
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+}
+
+async function clearQueue(): Promise<void> {
+  await AsyncStorage.removeItem(QUEUE_KEY);
+}
 
 type ProcessingStatus = "idle" | "recording" | "transcribing" | "categorizing" | "done" | "error";
 
@@ -18,6 +44,7 @@ interface RecordingState {
   setTranscript: (transcript: string) => void;
   setAudioUri: (uri: string, duration: number) => void;
   categorize: (userId: string) => Promise<void>;
+  processQueue: (userId: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -38,6 +65,23 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
 
     if (!transcript.trim()) {
       set({ status: "error", error: "No speech detected — try again?" });
+      return;
+    }
+
+    // Check connectivity
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      await addToQueue({
+        transcript,
+        audioUri: audioUri || "",
+        duration,
+        timestamp: new Date().toISOString(),
+      });
+      set({
+        status: "done",
+        result: { items: [], health_entries: [] },
+        error: "You're offline. Your note has been saved and will be processed when you're back online.",
+      });
       return;
     }
 
@@ -99,6 +143,21 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
         error: err.message || "Failed to categorize. Your note has been saved.",
       });
     }
+  },
+
+  processQueue: async (userId) => {
+    const queue = await getQueue();
+    if (queue.length === 0) return;
+
+    for (const note of queue) {
+      set({
+        transcript: note.transcript,
+        audioUri: note.audioUri || null,
+        duration: note.duration,
+      });
+      await get().categorize(userId);
+    }
+    await clearQueue();
   },
 
   reset: () =>

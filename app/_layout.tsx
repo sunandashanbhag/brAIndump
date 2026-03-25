@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
+import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "../src/stores/authStore";
+import { useRecordingStore } from "../src/stores/recordingStore";
 import { View, ActivityIndicator } from "react-native";
 import { registerForPushNotifications } from "../src/lib/notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -34,6 +36,16 @@ export default function RootLayout() {
       checkOnboarding();
     }
   }, [session, loading, segments]);
+
+  // Process offline queue when connectivity is restored
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected && session?.user?.id) {
+        useRecordingStore.getState().processQueue(session.user.id);
+      }
+    });
+    return () => unsubscribe();
+  }, [session]);
 
   if (loading) {
     return (
