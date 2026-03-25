@@ -3,6 +3,8 @@ import { View, Text, FlatList, StyleSheet, RefreshControl } from "react-native";
 import { useAuthStore } from "../../src/stores/authStore";
 import { useCategoryStore } from "../../src/stores/categoryStore";
 import { CategoryCard } from "../../src/components/CategoryCard";
+import { NudgePrompt } from "../../src/components/NudgePrompt";
+import { supabase } from "../../src/lib/supabase";
 
 export default function HomeScreen() {
   const session = useAuthStore((s) => s.session);
@@ -10,6 +12,7 @@ export default function HomeScreen() {
     categories, items, loading,
     fetchCategories, fetchItems, seedCategories,
     getTopLevelCategories, getItemsByCategory, getSubCategories,
+    updateItemCategory,
   } = useCategoryStore();
 
   const userId = session?.user?.id;
@@ -40,6 +43,8 @@ export default function HomeScreen() {
     };
   };
 
+  const lowConfidenceItems = items.filter((i) => i.confidence === "low" && i.status === "pending");
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -51,6 +56,26 @@ export default function HomeScreen() {
         }}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+        ListHeaderComponent={
+          <>
+            {lowConfidenceItems.map((item) => (
+              <NudgePrompt
+                key={item.id}
+                item={item}
+                categories={categories}
+                onSelect={async (itemId, categoryId) => {
+                  await updateItemCategory(itemId, categoryId);
+                  await supabase.from("items").update({ confidence: "high" }).eq("id", itemId);
+                  await fetchItems(userId!);
+                }}
+                onDismiss={async (itemId) => {
+                  await supabase.from("items").update({ confidence: "high" }).eq("id", itemId);
+                  await fetchItems(userId!);
+                }}
+              />
+            ))}
+          </>
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyText}>No categories yet. Record a voice note to get started!</Text>
