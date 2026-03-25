@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { useAuthStore } from "../src/stores/authStore";
 import { View, ActivityIndicator } from "react-native";
+import { registerForPushNotifications } from "../src/lib/notifications";
 
 export default function RootLayout() {
   const { session, loading, initialize } = useAuthStore();
@@ -10,6 +11,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     initialize();
+    registerForPushNotifications();
   }, []);
 
   useEffect(() => {

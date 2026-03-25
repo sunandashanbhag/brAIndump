@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { supabase } from "../lib/supabase";
 import { AICategorizationResult } from "../types";
 import { parseAIResponse } from "../lib/ai";
+import { scheduleReminder } from "../lib/notifications";
 
 type ProcessingStatus = "idle" | "recording" | "transcribing" | "categorizing" | "done" | "error";
 
@@ -77,6 +78,13 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
       });
 
       if (error) throw error;
+
+      // Schedule reminders for items with reminder_at
+      for (const item of data.items || []) {
+        if (item.reminder_at) {
+          await scheduleReminder(item.title, new Date(item.reminder_at), item.id);
+        }
+      }
 
       set({
         status: "done",
