@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",
+    "chrono-node": "^2.9.0",
     "expo": "~55.0.8",
     "expo-av": "^16.0.8",
     "expo-notifications": "~55.0.13",
