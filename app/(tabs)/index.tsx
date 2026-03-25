@@ -21,6 +21,33 @@ export default function HomeScreen() {
     if (userId) loadData();
   }, [userId]);
 
+  // Realtime subscription for live UI updates
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel("items-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "items", filter: `user_id=eq.${userId}` },
+        () => {
+          fetchItems(userId);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "categories", filter: `user_id=eq.${userId}` },
+        () => {
+          fetchCategories(userId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
   const loadData = async () => {
     if (!userId) return;
     await fetchCategories(userId);
