@@ -3,6 +3,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { useAuthStore } from "../src/stores/authStore";
 import { View, ActivityIndicator } from "react-native";
 import { registerForPushNotifications } from "../src/lib/notifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function RootLayout() {
   const { session, loading, initialize } = useAuthStore();
@@ -22,7 +23,15 @@ export default function RootLayout() {
     if (!session && !inAuthGroup) {
       router.replace("/(auth)/login");
     } else if (session && inAuthGroup) {
-      router.replace("/(tabs)");
+      const checkOnboarding = async () => {
+        const onboarded = await AsyncStorage.getItem("onboarding_complete");
+        if (!onboarded) {
+          router.replace("/onboarding");
+        } else {
+          router.replace("/(tabs)");
+        }
+      };
+      checkOnboarding();
     }
   }, [session, loading, segments]);
 
