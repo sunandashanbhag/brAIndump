@@ -4,6 +4,7 @@ import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "../src/stores/authStore";
 import { useRecordingStore } from "../src/stores/recordingStore";
 import { View, ActivityIndicator } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { registerForPushNotifications } from "../src/lib/notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -56,13 +57,15 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="onboarding" />
-      <Stack.Screen name="category/[id]" options={{ headerShown: true }} />
-      <Stack.Screen name="item/[id]" options={{ headerShown: true, presentation: "modal" }} />
-      <Stack.Screen name="health" options={{ headerShown: true }} />
-    </Stack>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="onboarding" />
+        <Stack.Screen name="category/[id]" options={{ headerShown: true }} />
+        <Stack.Screen name="item/[id]" options={{ headerShown: true, presentation: "modal" }} />
+        <Stack.Screen name="health" options={{ headerShown: true }} />
+      </Stack>
+    </GestureHandlerRootView>
   );
 }

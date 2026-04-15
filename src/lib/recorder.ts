@@ -1,8 +1,19 @@
-import { Audio } from "expo-av";
+let Audio: any = null;
 
-let recording: Audio.Recording | null = null;
+try {
+  Audio = require("expo-av").Audio;
+} catch {
+  // expo-av not available
+}
+
+let recording: any = null;
 
 export async function startRecording(): Promise<void> {
+  if (!Audio) {
+    console.warn("Audio recording not available in this environment");
+    return;
+  }
+
   const permission = await Audio.requestPermissionsAsync();
   if (!permission.granted) {
     throw new Error("Microphone permission not granted");

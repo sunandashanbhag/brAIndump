@@ -113,6 +113,7 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
       }
 
       // Call categorize edge function
+      console.log("[recordingStore] Calling edge function with:", { transcript, userId, voiceNoteId });
       const { data, error } = await supabase.functions.invoke("categorize", {
         body: {
           transcript,
@@ -120,6 +121,9 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
           voice_note_id: voiceNoteId,
         },
       });
+
+      console.log("[recordingStore] Edge function response - data:", JSON.stringify(data));
+      console.log("[recordingStore] Edge function response - error:", JSON.stringify(error));
 
       if (error) throw error;
 
@@ -138,6 +142,9 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
         },
       });
     } catch (err: any) {
+      console.error("[recordingStore] Categorize error:", err);
+      console.error("[recordingStore] Error message:", err.message);
+      console.error("[recordingStore] Error context:", JSON.stringify(err.context || {}));
       set({
         status: "error",
         error: err.message || "Failed to categorize. Your note has been saved.",

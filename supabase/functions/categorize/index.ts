@@ -5,24 +5,50 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  console.log("[categorize] Function invoked");
+  console.log("[categorize] GEMINI_API_KEY present:", !!GEMINI_API_KEY);
+  console.log("[categorize] SUPABASE_URL:", SUPABASE_URL);
+  console.log("[categorize] SERVICE_ROLE_KEY present:", !!SUPABASE_SERVICE_ROLE_KEY);
+
   try {
-    const { transcript, user_id, voice_note_id } = await req.json();
+    const body = await req.json();
+    console.log("[categorize] Request body:", JSON.stringify(body));
+
+    const { transcript, user_id, voice_note_id } = body;
 
     if (!transcript || !user_id) {
+      console.error("[categorize] Missing required fields - transcript:", !!transcript, "user_id:", !!user_id);
       return new Response(JSON.stringify({ error: "Missing transcript or user_id" }), {
         status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    console.log("[categorize] Creating Supabase client...");
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Fetch user's existing categories
-    const { data: categories } = await supabase
+    console.log("[categorize] Fetching categories for user:", user_id);
+    const { data: categories, error: catFetchError } = await supabase
       .from("categories")
       .select("*")
       .eq("user_id", user_id)
       .order("created_at");
+
+    if (catFetchError) {
+      console.error("[categorize] Category fetch error:", JSON.stringify(catFetchError));
+    }
+    console.log("[categorize] Found categories:", (categories || []).length);
 
     // Build category context for prompt
     const categoryList = (categories || [])
@@ -77,20 +103,33 @@ Respond ONLY with valid JSON in this exact format:
 }`;
 
     // Call Gemini 2.0 Flash
-    const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 2048 },
-        }),
-      }
-    );
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    console.log("[categorize] Calling Gemini API...");
+
+    const aiResponse = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 2048 },
+      }),
+    });
+
+    console.log("[categorize] Gemini response status:", aiResponse.status);
 
     const aiData = await aiResponse.json();
+    console.log("[categorize] Gemini response body:", JSON.stringify(aiData).slice(0, 500));
+
+    if (!aiResponse.ok) {
+      console.error("[categorize] Gemini API error:", JSON.stringify(aiData));
+      return new Response(
+        JSON.stringify({ error: "AI service error", details: aiData }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    console.log("[categorize] Raw AI text:", rawText);
 
     // Parse AI response
     let parsed;
@@ -99,7 +138,9 @@ Respond ONLY with valid JSON in this exact format:
       const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
       if (codeBlockMatch) cleaned = codeBlockMatch[1].trim();
       parsed = JSON.parse(cleaned);
-    } catch {
+      console.log("[categorize] Parsed AI response:", JSON.stringify(parsed));
+    } catch (parseError) {
+      console.error("[categorize] JSON parse error:", parseError.message, "Raw text was:", rawText);
       parsed = {
         items: [
           {
@@ -118,28 +159,34 @@ Respond ONLY with valid JSON in this exact format:
 
     // Process each extracted item
     for (const item of parsed.items || []) {
+      console.log("[categorize] Processing item:", JSON.stringify(item));
+
       let category = (categories || []).find(
         (c: any) => c.name.toLowerCase() === item.category_name.toLowerCase() && c.parent_id === null
       );
 
       if (!category) {
-        const { data: newCat } = await supabase
+        console.log("[categorize] Creating new category:", item.category_name);
+        const { data: newCat, error: catError } = await supabase
           .from("categories")
           .insert({ user_id, name: item.category_name, parent_id: null })
           .select()
           .single();
+        if (catError) console.error("[categorize] Category insert error:", JSON.stringify(catError));
+        else console.log("[categorize] Category created:", JSON.stringify(newCat));
         category = newCat;
       }
 
       let categoryId = category?.id;
-      if (item.sub_category_name && category) {
+      if (item.sub_category_name && item.sub_category_name !== "null" && category) {
         let subCat = (categories || []).find(
           (c: any) =>
             c.name.toLowerCase() === item.sub_category_name.toLowerCase() &&
             c.parent_id === category!.id
         );
         if (!subCat) {
-          const { data: newSub } = await supabase
+          console.log("[categorize] Creating sub-category:", item.sub_category_name);
+          const { data: newSub, error: subError } = await supabase
             .from("categories")
             .insert({
               user_id,
@@ -148,12 +195,14 @@ Respond ONLY with valid JSON in this exact format:
             })
             .select()
             .single();
+          if (subError) console.error("[categorize] Sub-category insert error:", JSON.stringify(subError));
           subCat = newSub;
         }
         if (subCat) categoryId = subCat.id;
       }
 
-      const { data: newItem } = await supabase
+      console.log("[categorize] Inserting item with category_id:", categoryId);
+      const { data: newItem, error: itemError } = await supabase
         .from("items")
         .insert({
           user_id,
@@ -167,37 +216,52 @@ Respond ONLY with valid JSON in this exact format:
         .select()
         .single();
 
+      if (itemError) {
+        console.error("[categorize] Item insert error:", JSON.stringify(itemError));
+      } else {
+        console.log("[categorize] Item created:", JSON.stringify(newItem));
+      }
+
       if (newItem) {
         createdItems.push(newItem);
 
         if (voice_note_id) {
-          await supabase.from("voice_note_items").insert({
+          const { error: linkError } = await supabase.from("voice_note_items").insert({
             voice_note_id,
             item_id: newItem.id,
           });
+          if (linkError) console.error("[categorize] Voice note link error:", JSON.stringify(linkError));
         }
       }
     }
 
     // Process health entries
     for (const entry of parsed.health_entries || []) {
-      await supabase.from("health_entries").insert({
+      console.log("[categorize] Inserting health entry:", JSON.stringify(entry));
+      const { error: healthError } = await supabase.from("health_entries").insert({
         user_id,
         type: entry.type,
         details: entry.details,
       });
+      if (healthError) console.error("[categorize] Health entry insert error:", JSON.stringify(healthError));
     }
 
+    const result = {
+      items: createdItems,
+      health_entries_count: (parsed.health_entries || []).length,
+    };
+    console.log("[categorize] Success! Returning:", JSON.stringify(result));
+
     return new Response(
-      JSON.stringify({
-        items: createdItems,
-        health_entries_count: (parsed.health_entries || []).length,
-      }),
-      { headers: { "Content-Type": "application/json" } }
+      JSON.stringify(result),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
+    console.error("[categorize] Unhandled error:", error.message);
+    console.error("[categorize] Stack:", error.stack);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
